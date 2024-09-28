@@ -1,13 +1,9 @@
-# -*- coding: utf-8 -*-
-# Commented out IPython magic to ensure Python compatibility.
-## Standard libraries
 import os
 import json
 import math
 import numpy as np
 import time
 
-## Imports for plotting
 import matplotlib.pyplot as plt
 # %matplotlib inline
 from IPython.display import set_matplotlib_formats
@@ -19,7 +15,7 @@ import seaborn as sns
 sns.reset_orig()
 sns.set()
 
-## Progress bar
+## progress bar
 from tqdm.notebook import tqdm
 
 ## PyTorch
@@ -40,22 +36,22 @@ except ModuleNotFoundError: # Google Colab does not have PyTorch Lightning insta
     import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
-# Path to the folder where the datasets are/should be downloaded (e.g. CIFAR10)
-DATASET_PATH = "../data"
-# Path to the folder where the pretrained models are saved
-CHECKPOINT_PATH = "../saved_models/tutorial7"
+# path - dataset
+DATASET_PATH = "C:/cubis/desktop/data"
+# path - pretrained models are saved
+CHECKPOINT_PATH = "C:/cubis/desktop/saved_models/tutorial7"
 
-# Setting the seed
-pl.seed_everything(42)
 
-# Ensure that all operations are deterministic on GPU (if used) for reproducibility
+pl.seed_everything(42) # set seed
+
+# check all operations are deterministic on GPU (if used) for reproducibility
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 print(device)
 
-"""We also have a few pre-trained models we download below."""
+"""a few pre-trained models can be downloaded from the below address"""
 
 import urllib.request
 from urllib.error import HTTPError
@@ -64,10 +60,9 @@ base_url = "https://raw.githubusercontent.com/phlippe/saved_models/main/tutorial
 # Files to download
 pretrained_files = ["NodeLevelMLP.ckpt", "NodeLevelGNN.ckpt", "GraphLevelGraphConv.ckpt"]
 
-# Create checkpoint path if it doesn't exist yet
+# create checkpoint path if it doesn't exist yet
 os.makedirs(CHECKPOINT_PATH, exist_ok=True)
 
-# For each file, check whether it already exists. If not, try downloading it.
 for file_name in pretrained_files:
     file_path = os.path.join(CHECKPOINT_PATH, file_name)
     if "/" in file_name:
@@ -79,45 +74,16 @@ for file_name in pretrained_files:
             urllib.request.urlretrieve(file_url, file_path)
         except HTTPError as e:
             print("Something went wrong. Please try to download the file from the GDrive folder, or contact the author with the full output including the following error:\n", e)
-
-"""## Graph Neural Networks
-
-### Graph representation
-
-Before starting the discussion of specific neural network operations on graphs, we should consider how to represent a graph. Mathematically, a graph $\mathcal{G}$ is defined as a tuple of a set of nodes/vertices $V$, and a set of edges/links $E$: $\mathcal{G}=(V,E)$. Each edge is a pair of two vertices, and represents a connection between them. For instance, let's look at the following graph:
-
-<center width="100%" style="padding:10px"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/example_graph.svg?raw=1" width="250px"></center>
-
-The vertices are $V=\{1,2,3,4\}$, and edges $E=\{(1,2), (2,3), (2,4), (3,4)\}$. Note that for simplicity, we assume the graph to be undirected and hence don't add mirrored pairs like $(2,1)$. In application, vertices and edge can often have specific attributes, and edges can even be directed. The question is how we could represent this diversity in an efficient way for matrix operations. Usually, for the edges, we decide between two variants: an adjacency matrix, or a list of paired vertex indices.
-
-The **adjacency matrix** $A$ is a square matrix whose elements indicate whether pairs of vertices are adjacent, i.e. connected, or not. In the simplest case, $A_{ij}$ is 1 if there is a connection from node $i$ to $j$, and otherwise 0. If we have edge attributes or different categories of edges in a graph, this information can be added to the matrix as well. For an undirected graph, keep in mind that $A$ is a symmetric matrix ($A_{ij}=A_{ji}$). For the example graph above, we have the following adjacency matrix:
-
-$$
-A = \begin{bmatrix}
-    0 & 1 & 0 & 0\\
-    1 & 0 & 1 & 1\\
-    0 & 1 & 0 & 1\\
-    0 & 1 & 1 & 0
-\end{bmatrix}
-$$
-
-While expressing a graph as a list of edges is more efficient in terms of memory and (possibly) computation, using an adjacency matrix is more intuitive and simpler to implement. In our implementations below, we will rely on the adjacency matrix to keep the code simple. However, common libraries use edge lists, which we will discuss later more.
-Alternatively, we could also use the list of edges to define a sparse adjacency matrix with which we can work as if it was a dense matrix, but allows more memory-efficient operations. PyTorch supports this with the sub-package `torch.sparse` ([documentation](https://pytorch.org/docs/stable/sparse.html)) which is however still in a beta-stage (API might change in future).
-
-### Graph Convolutions
-
-Graph Convolutional Networks have been introduced by [Kipf et al.](https://openreview.net/pdf?id=SJU4ayYgl) in 2016 at the University of Amsterdam. He also wrote a great [blog post](https://tkipf.github.io/graph-convolutional-networks/) about this topic, which is recommended if you want to read about GCNs from a different perspective. GCNs are similar to convolutions in images in the sense that the "filter" parameters are typically shared over all locations in the graph. At the same time, GCNs rely on message passing methods, which means that vertices exchange information with the neighbors, and send "messages" to each other. Before looking at the math, we can try to visually understand how GCNs work. The first step is that each node creates a feature vector that represents the message it wants to send to all its neighbors. In the second step, the messages are sent to the neighbors, so that a node receives one message per adjacent node. Below we have visualized the two steps for our example graph.
-
-<center width="100%" style="padding:10px"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/graph_message_passing.svg?raw=1" width="700px"></center>
-
-If we want to formulate that in more mathematical terms, we need to first decide how to combine all the messages a node receives. As the number of messages vary across nodes, we need an operation that works for any number. Hence, the usual way to go is to sum or take the mean. Given the previous features of nodes $H^{(l)}$, the GCN layer is defined as follows:
-
-$$H^{(l+1)} = \sigma\left(\hat{D}^{-1/2}\hat{A}\hat{D}^{-1/2}H^{(l)}W^{(l)}\right)$$
-
-$W^{(l)}$ is the weight parameters with which we transform the input features into messages ($H^{(l)}W^{(l)}$). To the adjacency matrix $A$ we add the identity matrix so that each node sends its own message also to itself: $\hat{A}=A+I$. Finally, to take the average instead of summing, we calculate the matrix $\hat{D}$ which is a diagonal matrix with $D_{ii}$ denoting the number of neighbors node $i$ has. $\sigma$ represents an arbitrary activation function, and not necessarily the sigmoid (usually a ReLU-based activation function is used in GNNs).
-
-When implementing the GCN layer in PyTorch, we can take advantage of the flexible operations on tensors. Instead of defining a matrix $\hat{D}$, we can simply divide the summed messages by the number of neighbors afterward. Additionally, we replace the weight matrix with a linear layer, which additionally allows us to add a bias. Written as a PyTorch module, the GCN layer is defined as follows:
 """
+### Graph Convolutions
+As the number of messages vary across nodes, we need to find the right operation that works for any number. 
+Commonly, we take sum or mean and using this we can define GCN layer as follows:
+$$H^{(l+1)} = \sigma\left(\hat{D}^{-1/2}\hat{A}\hat{D}^{-1/2}H^{(l)}W^{(l)}\right)$$
+$W^{(l)}$ is the weight parameters that allows us to transform the input features into messages of ($H^{(l)}W^{(l)}$). 
+For the adjacency matrix part, defined as $A$, we add the identity matrix so it makes each node to send its own message also to itself: $\hat{A}=A+I$. Finally, to take the average instead of summing, we calculate the matrix $\hat{D}$ which is a diagonal matrix with $D_{ii}$ denoting the number of neighbors node $i$ has. $\sigma$ represents an arbitrary activation function, and not necessarily the sigmoid (usually a ReLU-based activation function is used in GNNs).
+Now, implementing GCN layer in PyTorch- allows us to do flexible operations on tensors. 
+(1) we can avoid to use and define a matrix $\hat{D}$, but we only need to divide the summed messages by the number of neighbours. 
+(2) it allows us to add a bias with replacing the weight matrix with a linear layer.
 
 class GCNLayer(nn.Module):
 
@@ -140,8 +106,6 @@ class GCNLayer(nn.Module):
         node_feats = node_feats / num_neighbours
         return node_feats
 
-"""To further understand the GCN layer, we can apply it to our example graph above. First, let's specify some node features and the adjacency matrix with added self-connections:"""
-
 node_feats = torch.arange(8, dtype=torch.float32).view(1, 4, 2)
 adj_matrix = torch.Tensor([[[1, 1, 0, 0],
                             [1, 1, 1, 1],
@@ -151,7 +115,7 @@ adj_matrix = torch.Tensor([[[1, 1, 0, 0],
 print("Node features:\n", node_feats)
 print("\nAdjacency matrix:\n", adj_matrix)
 
-"""Next, let's apply a GCN layer to it. For simplicity, we initialize the linear weight matrix as an identity matrix so that the input features are equal to the messages. This makes it easier for us to verify the message passing operation."""
+"""apply a GCN layer. We initialize the linear weight matrix as an identity matrix so that the input features are equal to the messages. This makes it easier for us to verify the message passing operation."""
 
 layer = GCNLayer(c_in=2, c_out=2)
 layer.projection.weight.data = torch.Tensor([[1., 0.], [0., 1.]])
@@ -164,18 +128,7 @@ print("Adjacency matrix", adj_matrix)
 print("Input features", node_feats)
 print("Output features", out_feats)
 
-"""As we can see, the first node's output values are the average of itself and the second node. Similarly, we can verify all other nodes. However, in a GNN, we would also want to allow feature exchange between nodes beyond its neighbors. This can be achieved by applying multiple GCN layers, which gives us the final layout of a GNN. The GNN can be build up by a sequence of GCN layers and non-linearities such as ReLU. For a visualization, see below (figure credit - [Thomas Kipf, 2016](https://tkipf.github.io/graph-convolutional-networks/)).
-
-<center width="100%" style="padding: 10px"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/gcn_network.png?raw=1" width="600px"></center>
-
-However, one issue we can see from looking at the example above is that the output features for nodes 3 and 4 are the same because they have the same adjacent nodes (including itself). Therefore, GCN layers can make the network forget node-specific information if we just take a mean over all messages. Multiple possible improvements have been proposed. While the simplest option might be using residual connections, the more common approach is to either weigh the self-connections higher or define a separate weight matrix for the self-connections. Alternatively, we can re-visit a concept from the last tutorial: attention.
-
 ### Graph Attention
-
-If you remember from the last tutorial, attention describes a weighted average of multiple elements with the weights dynamically computed based on an input query and elements' keys (if you haven't read Tutorial 6 yet, it is recommended to at least go through the very first section called [What is Attention?](https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial6/Transformers_and_MHAttention.html#What-is-Attention?)). This concept can be similarly applied to graphs, one of such is the Graph Attention Network (called GAT, proposed by [Velickovic et al., 2017](https://arxiv.org/abs/1710.10903)). Similarly to the GCN, the graph attention layer creates a message for each node using a linear layer/weight matrix. For the attention part, it uses the message from the node itself as a query, and the messages to average as both keys and values (note that this also includes the message to itself). The score function $f_{attn}$ is implemented as a one-layer MLP which maps the query and key to a single value. The MLP looks as follows (figure credit - [Velickovic et al.](https://arxiv.org/abs/1710.10903)):
-
-<center width="100%" style="padding:10px"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/graph_attention_MLP.svg?raw=1" width="250px"></center>
-
 $h_i$ and $h_j$ are the original features from node $i$ and $j$ respectively, and represent the messages of the layer with $\mathbf{W}$ as weight matrix. $\mathbf{a}$ is the weight matrix of the MLP, which has the shape $[1,2\times d_{\text{message}}]$, and $\alpha_{ij}$ the final attention weight from node $i$ to $j$. The calculation can be described as follows:
 
 $$\alpha_{ij} = \frac{\exp\left(\text{LeakyReLU}\left(\mathbf{a}\left[\mathbf{W}h_i||\mathbf{W}h_j\right]\right)\right)}{\sum_{k\in\mathcal{N}_i} \exp\left(\text{LeakyReLU}\left(\mathbf{a}\left[\mathbf{W}h_i||\mathbf{W}h_k\right]\right)\right)}$$
@@ -191,19 +144,9 @@ $$
 \end{split}
 $$
 
-We can see that without the non-linearity, the attention term with $h_i$ actually cancels itself out, resulting in the attention being independent of the node itself. Hence, we would have the same issue as the GCN of creating the same output features for nodes with the same neighbors. This is why the LeakyReLU is crucial and adds some dependency on $h_i$ to the attention.
-
-Once we obtain all attention factors, we can calculate the output features for each node by performing the weighted average:
-
+Without the non-linearity, the attention term with $h_i$ actually cancels itself out, resulting in the attention being independent of the node itself. Hence, we would have the same issue as the GCN of creating the same output features for nodes with the same neighbors. This is why the LeakyReLU is crucial and adds some dependency on $h_i$ to the attention.
+After collecting all obtained attention factors, we can calculate the output features for each node with weighted average:
 $$h_i'=\sigma\left(\sum_{j\in\mathcal{N}_i}\alpha_{ij}\mathbf{W}h_j\right)$$
-
-$\sigma$ is yet another non-linearity, as in the GCN layer. Visually, we can represent the full message passing in an attention layer as follows (figure credit - [Velickovic et al.](https://arxiv.org/abs/1710.10903)):
-
-<center width="100%"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/graph_attention.jpeg?raw=1" width="400px"></center>
-
-To increase the expressiveness of the graph attention network, [Velickovic et al.](https://arxiv.org/abs/1710.10903) proposed to extend it to multiple heads similar to the Multi-Head Attention block in Transformers. This results in $N$ attention layers being applied in parallel. In the image above, it is visualized as three different colors of arrows (green, blue, and purple) that are afterward concatenated. The average is only applied for the very final prediction layer in a network.
-
-After having discussed the graph attention layer in detail, we can implement it below:
 """
 
 class GATLayer(nn.Module):
@@ -211,44 +154,44 @@ class GATLayer(nn.Module):
     def __init__(self, c_in, c_out, num_heads=1, concat_heads=True, alpha=0.2):
         """
         Inputs:
-            c_in - Dimensionality of input features
-            c_out - Dimensionality of output features
-            num_heads - Number of heads, i.e. attention mechanisms to apply in parallel. The
+            c_in - dim of input features
+            c_out - dim of output features
+            num_heads - number of heads (=attention mechanisms to apply in parallel).
                         output features are equally split up over the heads if concat_heads=True.
-            concat_heads - If True, the output of the different heads is concatenated instead of averaged.
-            alpha - Negative slope of the LeakyReLU activation.
+            concat_heads - if True, the output of the different heads is being concatenated (not being averaged out).
+            alpha - negative slope of the LeakyReLU activation function
         """
         super().__init__()
         self.num_heads = num_heads
         self.concat_heads = concat_heads
         if self.concat_heads:
-            assert c_out % num_heads == 0, "Number of output features must be a multiple of the count of heads."
+            assert c_out % num_heads == 0, 
             c_out = c_out // num_heads
 
-        # Sub-modules and parameters needed in the layer
+        # sub-modules and parameters needed in the layer
         self.projection = nn.Linear(c_in, c_out * num_heads)
-        self.a = nn.Parameter(torch.Tensor(num_heads, 2 * c_out)) # One per head
+        self.a = nn.Parameter(torch.Tensor(num_heads, 2 * c_out)) # one per head
         self.leakyrelu = nn.LeakyReLU(alpha)
 
-        # Initialization from the original implementation
+        # initialization from the original implementation
         nn.init.xavier_uniform_(self.projection.weight.data, gain=1.414)
         nn.init.xavier_uniform_(self.a.data, gain=1.414)
 
     def forward(self, node_feats, adj_matrix, print_attn_probs=False):
         """
         Inputs:
-            node_feats - Input features of the node. Shape: [batch_size, c_in]
-            adj_matrix - Adjacency matrix including self-connections. Shape: [batch_size, num_nodes, num_nodes]
+            node_feats - input features of the node; shape: [batch_size, c_in]
+            adj_matrix - adj mat including self-connections; shape: [batch_size, num_nodes, num_nodes]
             print_attn_probs - If True, the attention weights are printed during the forward pass (for debugging purposes)
         """
         batch_size, num_nodes = node_feats.size(0), node_feats.size(1)
 
-        # Apply linear layer and sort nodes by head
+        # apply linear layer and sort nodes by head
         node_feats = self.projection(node_feats)
         node_feats = node_feats.view(batch_size, num_nodes, self.num_heads, -1)
 
-        # We need to calculate the attention logits for every edge in the adjacency matrix
-        # Doing this on all possible combinations of nodes is very expensive
+        # calculating the attention logits for every edge in the adjacency matrix
+        # conducting this operations on all possible combinations of nodes is very (computationally) expensive
         # => Create a tensor of [W*h_i||W*h_j] with i and j being the indices of all edges
         edges = adj_matrix.nonzero(as_tuple=False) # Returns indices where the adjacency matrix is not 0 => edges
         node_feats_flat = node_feats.view(batch_size * num_nodes, self.num_heads, -1)
@@ -259,29 +202,27 @@ class GATLayer(nn.Module):
             torch.index_select(input=node_feats_flat, index=edge_indices_col, dim=0)
         ], dim=-1) # Index select returns a tensor with node_feats_flat being indexed at the desired positions along dim=0
 
-        # Calculate attention MLP output (independent for each head)
+        # attention MLP output (independent for each head)
         attn_logits = torch.einsum('bhc,hc->bh', a_input, self.a)
         attn_logits = self.leakyrelu(attn_logits)
 
-        # Map list of attention values back into a matrix
+        # map list of attention values back into a matrix
         attn_matrix = attn_logits.new_zeros(adj_matrix.shape+(self.num_heads,)).fill_(-9e15)
         attn_matrix[adj_matrix[...,None].repeat(1,1,1,self.num_heads) == 1] = attn_logits.reshape(-1)
 
-        # Weighted average of attention
+        # weighted average of attention
         attn_probs = F.softmax(attn_matrix, dim=2)
         if print_attn_probs:
             print("Attention probs\n", attn_probs.permute(0, 3, 1, 2))
         node_feats = torch.einsum('bijh,bjhc->bihc', attn_probs, node_feats)
 
-        # If heads should be concatenated, we can do this by reshaping. Otherwise, take mean
+        # concatenated using reshaping OR taking the average
         if self.concat_heads:
             node_feats = node_feats.reshape(batch_size, num_nodes, -1)
         else:
             node_feats = node_feats.mean(dim=2)
 
         return node_feats
-
-"""Again, we can apply the graph attention layer on our example graph above to understand the dynamics better. As before, the input layer is initialized as an identity matrix, but we set $\mathbf{a}$ to be a vector of arbitrary numbers to obtain different attention values. We use two heads to show the parallel, independent attention mechanisms working in the layer."""
 
 layer = GATLayer(2, 2, num_heads=2)
 layer.projection.weight.data = torch.Tensor([[1., 0.], [0., 1.]])
@@ -295,13 +236,7 @@ print("Adjacency matrix", adj_matrix)
 print("Input features", node_feats)
 print("Output features", out_feats)
 
-"""We recommend that you try to calculate the attention matrix at least for one head and one node for yourself. The entries are 0 where there does not exist an edge between $i$ and $j$. For the others, we see a diverse set of attention probabilities. Moreover, the output features of node 3 and 4 are now different although they have the same neighbors.
-
 ## PyTorch Geometric
-
-We had mentioned before that implementing graph networks with adjacency matrix is simple and straight-forward but can be computationally expensive for large graphs. Many real-world graphs can reach over 200k nodes, for which adjacency matrix-based implementations fail. There are a lot of optimizations possible when implementing GNNs, and luckily, there exist packages that provide such layers. The most popular packages for PyTorch are [PyTorch Geometric](https://pytorch-geometric.readthedocs.io/en/latest/) and the [Deep Graph Library](https://www.dgl.ai/) (the latter being actually framework agnostic). Which one to use depends on the project you are planning to do and personal taste. In this tutorial, we will look at PyTorch Geometric as part of the PyTorch family. Similar to PyTorch Lightning, PyTorch Geometric is not installed by default on GoogleColab (and actually also not in our `dl2021` environment due to many dependencies that would be unnecessary for the practicals). Hence, let's import and/or install it below:
-"""
-
 # torch geometric
 try:
     import torch_geometric
@@ -320,48 +255,39 @@ except ModuleNotFoundError:
 import torch_geometric.nn as geom_nn
 import torch_geometric.data as geom_data
 
-"""PyTorch Geometric provides us a set of common graph layers, including the GCN and GAT layer we implemented above. Additionally, similar to PyTorch's torchvision, it provides the common graph datasets and transformations on those to simplify training. Compared to our implementation above, PyTorch Geometric uses a list of index pairs to represent the edges. The details of this library will be explored further in our experiments.
-
-In our tasks below, we want to allow us to pick from a multitude of graph layers. Thus, we define again below a dictionary to access those using a string:
-"""
-
 gnn_layer_by_name = {
     "GCN": geom_nn.GCNConv,
     "GAT": geom_nn.GATConv,
     "GraphConv": geom_nn.GraphConv
 }
 
-"""Additionally to GCN and GAT, we added the layer `geom_nn.GraphConv` ([documentation](https://pytorch-geometric.readthedocs.io/en/latest/modules/nn.html#torch_geometric.nn.conv.GraphConv)). GraphConv is a GCN with a separate weight matrix for the self-connections. Mathematically, this would be:
-
+"""Additionally to GCN and GAT, the tutorial added the layer `geom_nn.GraphConv`
 $$
 \mathbf{x}_i^{(l+1)} = \mathbf{W}^{(l + 1)}_1 \mathbf{x}_i^{(l)} + \mathbf{W}^{(\ell + 1)}_2 \sum_{j \in \mathcal{N}_i} \mathbf{x}_j^{(l)}
 $$
 
-In this formula, the neighbor's messages are added instead of averaged. However, PyTorch Geometric provides the argument `aggr` to switch between summing, averaging, and max pooling.
+The neighbor's messages are added instead of taken to be averaged. 
+NOTE: However, PyTorch Geometric provides the argument `aggr` to switch between summing, averaging, and max pooling.
 
-## Experiments on graph structures
+## different graph structures
 
-Tasks on graph-structured data can be grouped into three groups: node-level, edge-level and graph-level. The different levels describe on which level we want to perform classification/regression. We will discuss all three types in more detail below.
+three groups based on the graph structure: node-level, edge-level and graph-level.
 
 ### Node-level tasks: Semi-supervised node classification
+Node-level tasks have the goal to classify nodes in a graph. 
+Usually, we have given a single, large graph with >1000 nodes of which a certain amount of nodes are labeled. 
+We learn to classify those labeled examples during training and try to generalize to the unlabeled nodes.
 
-Node-level tasks have the goal to classify nodes in a graph. Usually, we have given a single, large graph with >1000 nodes of which a certain amount of nodes are labeled. We learn to classify those labeled examples during training and try to generalize to the unlabeled nodes.
-
-A popular example that we will use in this tutorial is the Cora dataset, a citation network among papers. The Cora consists of 2708 scientific publications with links between each other representing the citation of one paper by another. The task is to classify each publication into one of seven classes. Each publication is represented by a bag-of-words vector. This means that we have a vector of 1433 elements for each publication, where a 1 at feature $i$ indicates that the $i$-th word of a pre-defined dictionary is in the article. Binary bag-of-words representations are commonly used when we need very simple encodings, and already have an intuition of what words to expect in a network. There exist much better approaches, but we will leave this to the NLP courses to discuss.
-
-We will load the dataset below:
+Cora dataset - popular for network dataframework.
+It consists of 2708 scientific publications with links between each other representing the citation of one paper by another. 
+The task is to classify each publication into one of seven classes. Each publication is represented by a bag-of-words vector. 
+This means that we have a vector of 1433 elements for each publication, where a 1 at feature $i$ indicates that the $i$-th word of a pre-defined dictionary is in the article. 
+Binary bag-of-words representations are commonly used when we need very simple encodings, and already have an intuition of what words to expect in a network. There exist much better approaches, but we will leave this to the NLP courses to discuss.
 """
 
 cora_dataset = torch_geometric.datasets.Planetoid(root=DATASET_PATH, name="Cora")
 
-"""Let's look at how PyTorch Geometric represents the graph data. Note that although we have a single graph, PyTorch Geometric returns a dataset for compatibility to other datasets."""
-
 cora_dataset[0]
-
-"""The graph is represented by a `Data` object ([documentation](https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html#torch_geometric.data.Data)) which we can access as a standard Python namespace. The edge index tensor is the list of edges in the graph and contains the mirrored version of each edge for undirected graphs. The `train_mask`, `val_mask`, and `test_mask` are boolean masks that indicate which nodes we should use for training, validation, and testing. The `x` tensor is the feature tensor of our 2708 publications, and `y` the labels for all nodes.
-
-After having seen the data, we can implement a simple graph neural network. The GNN applies a sequence of graph layers (GCN, GAT, or GraphConv), ReLU as activation function, and dropout for regularization. See below for the specific implementation.
-"""
 
 class GNNModel(nn.Module):
 
@@ -444,7 +370,7 @@ class MLPModel(nn.Module):
         """
         return self.layers(x)
 
-"""Finally, we can merge the models into a PyTorch Lightning module which handles the training, validation, and testing for us."""
+"""merge the models into a PyTorch Lightning module - which enables to go on the learning procedure: the training, validation, and testing for us."""
 
 class NodeLevelGNN(pl.LightningModule):
 
@@ -496,7 +422,8 @@ class NodeLevelGNN(pl.LightningModule):
         _, acc = self.forward(batch, mode="test")
         self.log('test_acc', acc)
 
-"""Additionally to the Lightning module, we define a training function below. As we have a single graph, we use a batch size of 1 for the data loader and share the same data loader for the train, validation, and test set (the mask is picked inside the Lightning module). Besides, we set the argument `enable_progress_bar` to False as it usually shows the progress per epoch, but an epoch only consists of a single step. The rest of the code is very similar to what we have seen in Tutorial 5 and 6 already."""
+"""in addition to the Lightning module, the tutorial define a training function as below. 
+As we have a single graph, we use a batch size of 1 for the data loader and share the same data loader for the train, validation, and test set (the mask is picked inside the Lightning module). Besides, we set the argument `enable_progress_bar` to False as it usually shows the progress per epoch, but an epoch only consists of a single step. The rest of the code is very similar to what we have seen in Tutorial 5 and 6 already."""
 
 def train_node_classifier(model_name, dataset, **model_kwargs):
     pl.seed_everything(42)
@@ -553,8 +480,6 @@ node_mlp_model, node_mlp_result = train_node_classifier(model_name="MLP",
 
 print_results(node_mlp_result)
 
-"""Although the MLP can overfit on the training dataset because of the high-dimensional input features, it does not perform too well on the test set. Let's see if we can beat this score with our graph networks:"""
-
 node_gnn_model, node_gnn_result = train_node_classifier(model_name="GNN",
                                                         layer_name="GCN",
                                                         dataset=cora_dataset,
@@ -563,49 +488,33 @@ node_gnn_model, node_gnn_result = train_node_classifier(model_name="GNN",
                                                         dp_rate=0.1)
 print_results(node_gnn_result)
 
-"""As we would have hoped for, the GNN model outperforms the MLP by quite a margin. This shows that using the graph information indeed improves our predictions and lets us generalizes better.
-
 The hyperparameters in the model have been chosen to create a relatively small network. This is because the first layer with an input dimension of 1433 can be relatively expensive to perform for large graphs. In general, GNNs can become relatively expensive for very big graphs. This is why such GNNs either have a small hidden size or use a special batching strategy where we sample a connected subgraph of the big, original graph.
 
 ### Edge-level tasks: Link prediction
 
-In some applications, we might have to predict on an edge-level instead of node-level. The most common edge-level task in GNN is link prediction. Link prediction means that given a graph, we want to predict whether there will be/should be an edge between two nodes or not. For example, in a social network, this is used by Facebook and co to propose new friends to you. Again, graph level information can be crucial to perform this task. The output prediction is usually done by performing a similarity metric on the pair of node features, which should be 1 if there should be a link, and otherwise close to 0. To keep the tutorial short, we will not implement this task ourselves. Nevertheless, there are many good resources out there if you are interested in looking closer at this task.
-Tutorials and papers for this topic include:
-
-* [PyTorch Geometric example](https://github.com/rusty1s/pytorch_geometric/blob/master/examples/link_pred.py)
-* [Graph Neural Networks: A Review of Methods and Applications](https://arxiv.org/pdf/1812.08434.pdf), Zhou et al. 2019
-* [Link Prediction Based on Graph Neural Networks](https://papers.nips.cc/paper/2018/file/53f0d7c537d99b3824f0f99d62ea2428-Paper.pdf), Zhang and Chen, 2018.
-
 ### Graph-level tasks: Graph classification
 
-Finally, in this part of the tutorial, we will have a closer look at how to apply GNNs to the task of graph classification. The goal is to classify an entire graph instead of single nodes or edges. Therefore, we are also given a dataset of multiple graphs that we need to classify based on some structural graph properties. The most common task for graph classification is molecular property prediction, in which molecules are represented as graphs. Each atom is linked to a node, and edges in the graph are the bonds between atoms. For example, look at the figure below.
+On the left, we have an arbitrary, small molecule with different atoms, whereas the right part of the image shows the graph representation. 
+The atom types are abstracted as node features (e.g. a one-hot vector), and the different bond types are used as edge features. 
+For simplicity, it neglected the edge attributes, but further it can be included using methods like the Relational Graph Convolutions.
 
-<center width="100%"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/molecule_graph.svg?raw=1" width="600px"></center>
-
-On the left, we have an arbitrary, small molecule with different atoms, whereas the right part of the image shows the graph representation. The atom types are abstracted as node features (e.g. a one-hot vector), and the different bond types are used as edge features. For simplicity, we will neglect the edge attributes in this tutorial, but you can include by using methods like the [Relational Graph Convolution](https://arxiv.org/abs/1703.06103) that uses a different weight matrix for each edge type.
-
-The dataset we will use below is called the MUTAG dataset. It is a common small benchmark for graph classification algorithms, and contain 188 graphs with 18 nodes and 20 edges on average for each graph. The graph nodes have 7 different labels/atom types, and the binary graph labels represent "their mutagenic effect on a specific gram negative bacterium" (the specific meaning of the labels are not too important here). The dataset is part of a large collection of different graph classification datasets, known as the [TUDatasets](https://chrsmrrs.github.io/datasets/), which is directly accessible via `torch_geometric.datasets.TUDataset` ([documentation](https://pytorch-geometric.readthedocs.io/en/latest/modules/datasets.html#torch_geometric.datasets.TUDataset)) in PyTorch Geometric. We can load the dataset below.
+The dataset we will use below is called the MUTAG dataset. It contains 188 graphs with 18 nodes and 20 edges on average for each graph. The graph nodes have 7 different labels/atom types, and the binary graph labels represent "their mutagenic effect on a specific gram negative bacterium" (the specific meaning of the labels are not too important here). The dataset is part of a large collection of different graph classification datasets, known as the [TUDatasets](https://chrsmrrs.github.io/datasets/), which is directly accessible via `torch_geometric.datasets.TUDataset` ([documentation](https://pytorch-geometric.readthedocs.io/en/latest/modules/datasets.html#torch_geometric.datasets.TUDataset)) in PyTorch Geometric. We can load the dataset below.
 """
 
 tu_dataset = torch_geometric.datasets.TUDataset(root=DATASET_PATH, name="MUTAG")
 
-"""Let's look at some statistics for the dataset:"""
+"""Preliminary statistics of the dataset:"""
 
 print("Data object:", tu_dataset.data)
 print("Length:", len(tu_dataset))
 print(f"Average label: {tu_dataset.data.y.float().mean().item():4.2f}")
-
-"""The first line shows how the dataset stores different graphs. The nodes, edges, and labels of each graph are concatenated to one tensor, and the dataset stores the indices where to split the tensors correspondingly. The length of the dataset is the number of graphs we have, and the "average label" denotes the percentage of the graph with label 1. As long as the percentage is in the range of 0.5, we have a relatively balanced dataset. It happens quite often that graph datasets are very imbalanced, hence checking the class balance is always a good thing to do.
-
-Next, we will split our dataset into a training and test part. Note that we do not use a validation set this time because of the small size of the dataset. Therefore, our model might overfit slightly on the validation set due to the noise of the evaluation, but we still get an estimate of the performance on untrained data.
-"""
 
 torch.manual_seed(42)
 tu_dataset.shuffle()
 train_dataset = tu_dataset[:150]
 test_dataset = tu_dataset[150:]
 
-"""When using a data loader, we encounter a problem with batching $N$ graphs. Each graph in the batch can have a different number of nodes and edges, and hence we would require a lot of padding to obtain a single tensor. Torch geometric uses a different, more efficient approach: we can view the $N$ graphs in a batch as a single large graph with concatenated node and edge list. As there is no edge between the $N$ graphs, running GNN layers on the large graph gives us the same output as running the GNN on each graph separately. Visually, this batching strategy is visualized below (figure credit - PyTorch Geometric team, [tutorial here](https://colab.research.google.com/drive/1I8a0DfQ3fI7Njc62__mVXUlcAleUclnb?usp=sharing#scrollTo=2owRWKcuoALo)).
+"""When using a data loader, common to encounter a problem with batching $N$ graphs. Each graph in the batch can have a different number of nodes and edges, and hence we would require a lot of padding to obtain a single tensor. Torch geometric uses a different, more efficient approach: we can view the $N$ graphs in a batch as a single large graph with concatenated node and edge list. As there is no edge between the $N$ graphs, running GNN layers on the large graph gives us the same output as running the GNN on each graph separately. Visually, this batching strategy is visualized below (figure credit - PyTorch Geometric team, [tutorial here](https://colab.research.google.com/drive/1I8a0DfQ3fI7Njc62__mVXUlcAleUclnb?usp=sharing#scrollTo=2owRWKcuoALo)).
 
 <center width="100%"><img src="https://github.com/phlippe/uvadlc_notebooks/blob/master/docs/tutorial_notebooks/tutorial7/torch_geometric_stacking_graphs.png?raw=1" width="600px"></center>
 
@@ -616,14 +525,14 @@ graph_train_loader = geom_data.DataLoader(train_dataset, batch_size=64, shuffle=
 graph_val_loader = geom_data.DataLoader(test_dataset, batch_size=64) # Additional loader if you want to change to a larger dataset
 graph_test_loader = geom_data.DataLoader(test_dataset, batch_size=64)
 
-"""Let's load a batch below to see the batching in action:"""
+"""Now, load a batch - we can see batching in action:"""
 
 batch = next(iter(graph_test_loader))
 print("Batch:", batch)
 print("Labels:", batch.y[:10])
 print("Batch indices:", batch.batch[:40])
 
-"""We have 38 graphs stacked together for the test dataset. The batch indices, stored in `batch`, show that the first 12 nodes belong to the first graph, the next 22 to the second graph, and so on. These indices are important for performing the final prediction. To perform a prediction over a whole graph, we usually perform a pooling operation over all nodes after running the GNN model. In this case, we will use the average pooling. Hence, we need to know which nodes should be included in which average pool. Using this pooling, we can already create our graph network below. Specifically, we re-use our class `GNNModel` from before, and simply add an average pool and single linear layer for the graph prediction task."""
+"""38 graphs stacked together for the test dataset. The batch indices, stored in `batch`, show that the first 12 nodes belong to the first graph, the next 22 to the second graph, and so on. These indices are important for performing the final prediction. To perform a prediction over a whole graph, we usually perform a pooling operation over all nodes after running the GNN model. In this case, we will use the average pooling. Hence, we need to know which nodes should be included in which average pool. Using this pooling, we can already create our graph network below. Specifically, we re-use our class `GNNModel` from before, and simply add an average pool and single linear layer for the graph prediction task."""
 
 class GraphGNNModel(nn.Module):
 
@@ -654,11 +563,11 @@ class GraphGNNModel(nn.Module):
             batch_idx - Index of batch element for each node
         """
         x = self.GNN(x, edge_index)
-        x = geom_nn.global_mean_pool(x, batch_idx) # Average pooling
+        x = geom_nn.global_mean_pool(x, batch_idx) # average pooling
         x = self.head(x)
         return x
 
-"""Finally, we can create a PyTorch Lightning module to handle the training. It is similar to the modules we have seen before and does nothing surprising in terms of training. As we have a binary classification task, we use the Binary Cross Entropy loss."""
+# again pytorch lightening module with cross entropy loss binary classification task
 
 class GraphLevelGNN(pl.LightningModule):
 
@@ -702,12 +611,12 @@ class GraphLevelGNN(pl.LightningModule):
         _, acc = self.forward(batch, mode="test")
         self.log('test_acc', acc)
 
-"""Below we train the model on our dataset. It resembles the typical training functions we have seen so far."""
+# training model for graph classification task
 
 def train_graph_classifier(model_name, **model_kwargs):
     pl.seed_everything(42)
 
-    # Create a PyTorch Lightning trainer with the generation callback
+    # creating a PyTorch Lightning trainer with the generation callback
     root_dir = os.path.join(CHECKPOINT_PATH, "GraphLevel" + model_name)
     os.makedirs(root_dir, exist_ok=True)
     trainer = pl.Trainer(default_root_dir=root_dir,
@@ -718,7 +627,7 @@ def train_graph_classifier(model_name, **model_kwargs):
                          enable_progress_bar=False)
     trainer.logger._default_hp_metric = None # Optional logging argument that we don't need
 
-    # Check whether pretrained model exists. If yes, load it and skip training
+    # pretrained model existence check
     pretrained_filename = os.path.join(CHECKPOINT_PATH, f"GraphLevel{model_name}.ckpt")
     if os.path.isfile(pretrained_filename):
         print("Found pretrained model, loading...")
@@ -736,8 +645,6 @@ def train_graph_classifier(model_name, **model_kwargs):
     result = {"test": test_result[0]['test_acc'], "train": train_result[0]['test_acc']}
     return model, result
 
-"""Finally, let's perform the training and testing. Feel free to experiment with different GNN layers, hyperparameters, etc."""
-
 model, result = train_graph_classifier(model_name="GraphConv",
                                        c_hidden=256,
                                        layer_name="GraphConv",
@@ -747,17 +654,3 @@ model, result = train_graph_classifier(model_name="GraphConv",
 
 print(f"Train performance: {100.0*result['train']:4.2f}%")
 print(f"Test performance:  {100.0*result['test']:4.2f}%")
-
-"""The test performance shows that we obtain quite good scores on an unseen part of the dataset. It should be noted that as we have been using the test set for validation as well, we might have overfitted slightly to this set. Nevertheless, the experiment shows us that GNNs can be indeed powerful to predict the properties of graphs and/or molecules.
-
-## Conclusion
-
-In this tutorial, we have seen the application of neural networks to graph structures. We looked at how a graph can be represented (adjacency matrix or edge list), and discussed the implementation of common graph layers: GCN and GAT. The implementations showed the practical side of the layers, which is often easier than the theory. Finally, we experimented with different tasks, on node-, edge- and graph-level. Overall, we have seen that including graph information in the predictions can be crucial for achieving high performance. There are a lot of applications that benefit from GNNs, and the importance of these networks will likely increase over the next years.
-
----
-
-[![Star our repository](https://img.shields.io/static/v1.svg?logo=star&label=⭐&message=Star%20Our%20Repository&color=yellow)](https://github.com/phlippe/uvadlc_notebooks/)  If you found this tutorial helpful, consider ⭐-ing our repository.    
-[![Ask questions](https://img.shields.io/static/v1.svg?logo=star&label=❔&message=Ask%20Questions&color=9cf)](https://github.com/phlippe/uvadlc_notebooks/issues)  For any questions, typos, or bugs that you found, please raise an issue on GitHub.
-
----
-"""
