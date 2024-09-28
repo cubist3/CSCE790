@@ -42,6 +42,19 @@ input_size = 784  # each image, 28x28 pixels (flattened to a 784-length vector)
 hidden_sizes = [128, 64]  # 2 hidden layers with 128 and 64 neurons
 output_size = 10  # 10 output classes (digits 0-9)
 
+# question (e)
+# input_size = 784
+# hidden_sizes = [256, 128]  # increase number of neurons in hidden layers
+# output_size = 10
+
+model = nn.Sequential(nn.Linear(input_size, hidden_sizes[0]),
+                      nn.ReLU(),
+                      nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+                      nn.ReLU(),
+                      nn.Linear(hidden_sizes[1], output_size),
+                      nn.LogSoftmax(dim=1))
+print(model)
+
 # sequential neural network architecture = {linear layers, ReLU activation, LogSoftmax output}
 model = nn.Sequential(nn.Linear(input_size, hidden_sizes[0]),
                       nn.ReLU(),
