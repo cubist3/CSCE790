@@ -1,21 +1,20 @@
-
 import skimage.data
 import numpy
 import matplotlib
 import NumPyCNN as numpycnn
 import matplotlib.pyplot
 
-# Reading the image
+# load the image file
 #img = skimage.io.imread("test.jpg")
 #img = skimage.data.checkerboard()
 img = skimage.data.chelsea()
 #img = skimage.data.camera()
 
-# Converting the image into gray.
+# convert the image into gray.
 img = skimage.color.rgb2gray(img)
 
-# First conv layer
-#l1_filter = numpy.random.rand(2,7,7)*20 # Preparing the filters randomly.
+# define 1st convultion layer
+#l1_filter = numpy.random.rand(2,7,7)*20 # assigns the filter randomly
 l1_filter = numpy.zeros((2,3,3))
 l1_filter[0, :, :] = numpy.array([[[-1, 0, 1], 
                                    [-1, 0, 1], 
@@ -32,7 +31,7 @@ print("\n**Pooling**")
 l1_feature_map_relu_pool = numpycnn.pooling(l1_feature_map_relu, 2, 2)
 print("**End of conv layer 1**\n")
 
-# Second conv layer
+# second convolutional layer
 l2_filter = numpy.random.rand(3, 5, 5, l1_feature_map_relu_pool.shape[-1])
 print("\n**Working with conv layer 2**")
 l2_feature_map = numpycnn.conv(l1_feature_map_relu_pool, l2_filter)
@@ -42,7 +41,7 @@ print("\n**Pooling**")
 l2_feature_map_relu_pool = numpycnn.pooling(l2_feature_map_relu, 2, 2)
 print("**End of conv layer 2**\n")
 
-# Third conv layer
+# third convolutional layer
 l3_filter = numpy.random.rand(1, 7, 7, l2_feature_map_relu_pool.shape[-1])
 print("\n**Working with conv layer 3**")
 l3_feature_map = numpycnn.conv(l2_feature_map_relu_pool, l3_filter)
@@ -54,17 +53,14 @@ print("**End of conv layer 3**\n")
 
 import matplotlib.pyplot as plt  # Import pyplot with alias plt
 
-# Graphing results
-fig0, ax0 = plt.subplots(nrows=1, ncols=1)  # Use plt.subplots to create the figure
-ax0.imshow(img).set_cmap("gray")  # Display the image in grayscale
-ax0.set_title("Input Image")  # Set the title for the image
-ax0.get_xaxis().set_ticks([])  # Hide x-axis ticks
-ax0.get_yaxis().set_ticks([])  # Hide y-axis ticks
+# results in plots, graphics
+fig0, ax0 = plt.subplots(nrows=1, ncols=1)  # plt.subplots to create the figure
+ax0.imshow(img).set_cmap("gray")  # image in grayscale
+ax0.set_title("Input Image")  # title for the image
+ax0.get_xaxis().set_ticks([])  # hide x-axis ticks
+ax0.get_yaxis().set_ticks([])  # hide y-axis ticks
 
-# Save the image to a file
 plt.savefig("in_img.png", bbox_inches="tight")
-
-# Close the figure to release memory
 plt.close(fig0)
 
 
