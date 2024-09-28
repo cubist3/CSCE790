@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 a = 10
 b = 28
 c = 8/3
-dt = 0.01  # Time step
-T = 10000  # Number of time steps
+dt = 0.01  
+T = 10000  
 
 x = np.zeros(T)
 y = np.zeros(T)
