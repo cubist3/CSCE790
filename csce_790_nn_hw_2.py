@@ -13,7 +13,7 @@ Original file is located at
 from google.colab import drive
 drive.mount('/content/drive')
 
-save_path = '/content/drive/MyDrive/Colab Notebooks/training_error_plot.png'
+save_path = '/content/drive/MyDrive/Colab Notebooks/training_error_plot'
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -56,27 +56,12 @@ for epoch in range(epochs):
     b -= eta * db
 
 plt.figure()
-plt.savefig(save_path, format='png')
 plt.plot(range(epochs), error_TRs)
 plt.xlabel('Epoch')
 plt.ylabel('Training Error')
 plt.title('Training errors by increasing the number of epoch')
-plt.show()
-
-plt.figure()  # Create a new figure
-plt.plot(range(epochs), error_TRs)  # Plot the data
-plt.xlabel('Epoch')  # Add x-axis label
-plt.ylabel('Training Error')  # Add y-axis label
-plt.title('Change in the training error based on increased number of epochs')  # Add title
-
-# Step 4: Save the plot as EPS in Google Drive
 plt.savefig(save_path, format='eps')
-
-# Optional: Display the plot to verify
 plt.show()
-
-# Close the plot to free memory
-plt.close()
 
 # decision boundary plot function is based on the below
 # https://stackoverflow.com/questions/22294241/plotting-a-decision-boundary-separating-2-classes-using-matplotlibs-pyplot
@@ -111,9 +96,27 @@ def db_plot(W, b, X, Y, epoch):
     plt.title(f'Decision Boundary after {epoch} Epochs')
     plt.show()
 
+import matplotlib
+matplotlib.use('Agg')  # Set the backend to Agg
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/decision_boundary_plot.eps'
+
+plt.figure()
 db_plot(W, b, X, Y, epoch=3)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/decision_boundary_plot_2.eps'
+plt.figure()
 db_plot(W, b, X, Y, epoch=10)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/decision_boundary_plot_3.eps'
+plt.figure()
 db_plot(W, b, X, Y, epoch=100)
+plt.savefig(save_path, format='eps')
+plt.show()
 
 # Part B
 # Q2
@@ -183,28 +186,6 @@ for epoch in range(epochs):
     W1 -= eta * dW1
     b1 -= eta * db1
 
-plt.figure()  # Create a new figure
-plt.plot(range(epochs), error_TRs)  # Plot the data
-plt.xlabel('Epoch')  # Add x-axis label
-plt.ylabel('Training Error')  # Add y-axis label
-plt.title('Change in the training error based on increased number of epochs')  # Add title
-
-# Step 4: Save the plot as EPS in Google Drive
-plt.savefig(save_path, format='eps')
-
-# Optional: Display the plot to verify
-plt.show()
-
-# Close the plot to free memory
-plt.close()
-
-plt.figure()
-plt.plot(range(epochs), error_TRs)
-plt.xlabel('Epoch')
-plt.ylabel('Training Error')
-plt.title('Change in the training error based on increased the number of epoch')
-plt.show()
-
 len(error_TRs)
 
 epochs
@@ -217,6 +198,8 @@ pred1 = sigmoid(Z1)
 Z2 = np.dot(W2, pred1) + b2
 Y_pred = linear(Z2)
 
+save_path = '/content/drive/MyDrive/Colab Notebooks/actual_versus_NN.eps'
+
 plt.figure()
 plt.plot(X.flatten(), Y.flatten(), 'o-', label='Actual Function')
 plt.plot(X.flatten(), Y_pred.flatten(), '.-', label='NN Approximation')
@@ -224,7 +207,8 @@ plt.xlabel('x')
 plt.ylabel('f(x)')
 plt.legend()
 plt.title('Actual vs. NN Approximation')
-plt.show()
+plt.savefig(save_path, format='eps')
+plt.close()
 
 def nn_approx(W1, b1, W2, b2, epoch):
     Z1 = np.dot(W1, X) + b1
@@ -234,15 +218,39 @@ def nn_approx(W1, b1, W2, b2, epoch):
 
     plt.figure()
     plt.plot(X.flatten(), Y.flatten(), 'o-', label='Actual Function')
-    plt.plot(X.flatten(), Y_pred.flatten(), 'x-', label=f'NN Approximation at {epoch} Epochs')
+    plt.plot(X.flatten(), Y_pred.flatten(), 'x-', label=f'NN Approximation')
     plt.xlabel('x')
     plt.ylabel('f(x)')
     plt.legend()
     plt.title(f'NN Approximation after {epoch} Epochs')
     plt.show()
 
+save_path = '/content/drive/MyDrive/Colab Notebooks/NN_approx_10_epochs.eps'
+plt.figure()
 nn_approx(W1, b1, W2, b2, epoch=10)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/NN_approx_100_epochs.eps'
+plt.figure()
 nn_approx(W1, b1, W2, b2, epoch=100)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/NN_approx_200_epochs.eps'
+plt.figure()
 nn_approx(W1, b1, W2, b2, epoch=200)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/NN_approx_400_epochs.eps'
+plt.figure()
 nn_approx(W1, b1, W2, b2, epoch=400)
+plt.savefig(save_path, format='eps')
+plt.close()
+
+save_path = '/content/drive/MyDrive/Colab Notebooks/NN_approx_1000_epochs.eps'
+plt.figure()
 nn_approx(W1, b1, W2, b2, epoch=1000)
+plt.savefig(save_path, format='eps')
+plt.close()
