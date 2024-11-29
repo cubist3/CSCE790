@@ -2,7 +2,7 @@
 # Part B
 # Q2
 
-# Y seems continuous so used linear in the output layer
+# Y continuous so used linear in the output layer
 
 def relu(Z):
     return np.maximum(0, Z)
